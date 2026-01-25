@@ -526,8 +526,8 @@ class TopicEngine:
             
             results = []
             now = time.time()
-            
-            for topic_id, topic in self.topics[group_id].items():
+            topics_snapshot = list(self.topics[group_id].items())
+            for topic_id, topic in topics_snapshot:
                 # 计算语义相似度
                 similarity = await self._calculate_topic_similarity(keywords, topic.keywords)
                 

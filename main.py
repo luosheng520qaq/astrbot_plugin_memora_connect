@@ -660,9 +660,6 @@ class MemoraConnectPlugin(Star):
             if not actual_theme:
                 logger.warning("创建记忆失败：主题为空")
                 return "创建记忆失败：主题为空"
-            if not allow_forget.lower() in ["true", "false"]:
-                logger.warning("创建记忆失败：allow_forget参数无效")
-                return "创建记忆失败：allow_forget参数无效"
             # 参数验证和清理
             if not content:
                 logger.warning("创建记忆失败：内容为空")
@@ -675,7 +672,11 @@ class MemoraConnectPlugin(Star):
             location = str(location).strip()
             emotion = str(emotion).strip()
             tags = str(tags).strip()
-            initial_allow_forget = self.memory_system._parse_allow_forget_value(allow_forget, True)
+            parsed_allow_forget = self.memory_system._parse_allow_forget_value(allow_forget, None)
+            if allow_forget is not None and parsed_allow_forget is None:
+                logger.warning("创建记忆失败：allow_forget参数无效")
+                return "创建记忆失败：allow_forget参数无效"
+            initial_allow_forget = parsed_allow_forget if parsed_allow_forget is not None else True
             
             # 将confidence从字符串转换为浮点数
             try:
