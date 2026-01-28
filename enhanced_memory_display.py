@@ -223,7 +223,7 @@ class EnhancedMemoryDisplay:
                 if concept:
                     concept_counts[concept.name] = concept_counts.get(concept.name, 0) + 1
             
-            top_concepts = sorted(concept_counts.items(), key=lambda x: x, reverse=True)[:5]
+            top_concepts = sorted(concept_counts.items(), key=lambda x: x[1], reverse=True)[:5]
             
             parts = [
                 "记忆库统计",

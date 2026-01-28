@@ -1113,13 +1113,44 @@ class MemorySystem:
             # 这是一个简化的实现，用于演示目的
             # 在实际应用中，这里应该有更复杂的逻辑来匹配关键词
             related_memories = []
+            if not keyword:
+                # 如果没有关键词，返回所有记忆（按强度排序，取前20条）
+                all_memories = list(self.memory_graph.memories.values())
+                all_memories.sort(key=lambda m: (m.strength, m.last_accessed), reverse=True)
+                return all_memories[:20]
+
             keyword_lower = keyword.lower()
 
+            # 1. 查找匹配的概念ID
+            matched_concept_ids = set()
+            for concept in self.memory_graph.concepts.values():
+                if keyword_lower in concept.name.lower():
+                    matched_concept_ids.add(concept.id)
+
+            # 2. 遍历记忆，匹配内容或概念ID
             for memory in self.memory_graph.memories.values():
+                # 匹配内容
                 if keyword_lower in memory.content.lower():
+                    related_memories.append(memory)
+                    continue
+                
+                # 匹配概念
+                if memory.concept_id in matched_concept_ids:
+                    related_memories.append(memory)
+                    continue
+                
+                # 匹配详情
+                if memory.details and keyword_lower in memory.details.lower():
+                    related_memories.append(memory)
+                    continue
+                
+                # 匹配标签
+                if memory.tags and keyword_lower in memory.tags.lower():
                     related_memories.append(memory)
             
             if related_memories:
+                # 按强度排序
+                related_memories.sort(key=lambda m: m.strength, reverse=True)
                 self._record_memory_access_by_ids([m.id for m in related_memories])
 
             return related_memories
