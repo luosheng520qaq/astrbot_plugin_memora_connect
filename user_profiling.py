@@ -642,15 +642,23 @@ class UserProfilingSystem:
         """
         try:
             # 检测反感关键词
+            # 增加对否定意图的更严格判断
             rejection_patterns = [
-                "别", "不要", "不想", "不喜欢", "讨厌", "反感",
-                "别剧透", "不说", "不聊", "不谈", "停止"
+                "别跟我提", "别再提", "禁止讨论", "不许说", "别说这个",
+                "讨厌这个", "反感这个", "不想听", "不想聊", "话题终止",
+                "不要聊", "不要说", "闭嘴", "打住"
             ]
             
             message_lower = message.lower()
             has_rejection = any(pattern in message_lower for pattern in rejection_patterns)
             
+            # 二次校验：如果只是简单的否定词（如“不”、“别”），可能只是普通对话
             if not has_rejection:
+                # 检查是否包含"别"或"不"且长度较短，可能是简单的拒绝指令
+                simple_negatives = ["别", "不", "不要", "no"]
+                if any(neg == message_lower.strip() for neg in simple_negatives):
+                    # 这种情况下通常依赖上下文，这里暂时保守处理，不触发
+                    return
                 return
             
             # 使用LLM提取被拒绝的主题
@@ -658,19 +666,38 @@ class UserProfilingSystem:
             if not llm_provider:
                 return
             
-            prompt = f"""从以下用户消息中提取用户不想讨论的话题或关键词（1-3个词）：
+            prompt = f"""分析以下用户消息，判断用户是否在表达对某个具体话题、事物或行为的强烈反感/禁止。
+            
 消息：{message}
+
+任务：
+1. 判断用户是否真的在禁止某个话题（区分普通否定和话题禁忌）。
+2. 如果是，提取出用户禁止的核心关键词（1-3个词，用逗号分隔）。
+3. 如果不是（例如只是普通聊天中的否定），请返回"None"。
+
+示例：
+- "别跟我提香菜" -> "香菜"
+- "我不喜欢今天的天气" -> "None" (只是抱怨，不是禁忌)
+- "不要再聊工作了" -> "工作"
+- "我不想吃这个" -> "None" (具体场景下的拒绝，非长期禁忌)
+- "禁止讨论政治" -> "政治"
+
 话题："""
             
             try:
-                response = await llm_provider.text_chat(prompt=prompt, context=[])
+                response = await llm_provider.text_chat(prompt=prompt, contexts=[])
                 topics = response.completion_text.strip()
                 
+                # 增加校验：排除 None 和空结果
+                if not topics or topics.lower() == "none":
+                    return
+
                 if topics and len(topics) > 0:
                     # 添加为禁忌词
                     for topic in topics.split(','):
                         topic = topic.strip()
-                        if topic:
+                        # 再次过滤：避免提取出"None"或过长的句子
+                        if topic and topic.lower() != "none" and len(topic) < 10:
                             await self.add_taboo_word(
                                 user_id=user_id,
                                 word=topic,
