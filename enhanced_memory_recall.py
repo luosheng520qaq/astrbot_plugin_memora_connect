@@ -4,6 +4,14 @@ from datetime import datetime
 import re
 from typing import Dict, List, Any, TYPE_CHECKING
 from dataclasses import dataclass
+
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    np = None
+    HAS_NUMPY = False
+
 try:
     from astrbot.api import logger
 except ImportError:
@@ -89,7 +97,7 @@ class EnhancedMemoryRecall:
             return []
     
     async def _semantic_recall(self, query: str, group_id: str = "") -> List[MemoryRecallResult]:
-        """基于语义相似度的召回 - 使用并填充缓存"""
+        """基于语义相似度的召回 - 使用并填充缓存 (支持 Numpy 加速)"""
         try:
             if not query:
                 return []
@@ -139,31 +147,85 @@ class EnhancedMemoryRecall:
                     failed_embeddings += 1
                     logger.warning(f"获取记忆 {memory_id} 的嵌入向量失败: {e}")
 
-            # 3. 在内存中计算相似度
             if failed_embeddings:
                 logger.debug(f"语义召回嵌入失败数: {failed_embeddings}")
-            for memory in memories_snapshot:
-                if memory.id in memory_embeddings:
-                    similarity = self._cosine_similarity(query_embedding, memory_embeddings[memory.id])
+
+            # 3. 计算相似度 (尝试使用 Numpy 加速)
+            use_numpy = HAS_NUMPY and len(memory_embeddings) > 0
+            
+            if use_numpy:
+                try:
+                    # 准备数据
+                    mem_ids = list(memory_embeddings.keys())
+                    matrix = np.array([memory_embeddings[mid] for mid in mem_ids])
+                    query_vec = np.array(query_embedding)
                     
-                    if similarity > 0.3:  # 相似度阈值
-                        concept = self.memory_system.memory_graph.concepts.get(memory.concept_id)
-                        if concept:
-                            results.append(MemoryRecallResult(
-                                memory=memory.content,
-                                relevance_score=similarity * self.recall_strategies['semantic'],
-                                memory_type='semantic',
-                                concept_id=memory.concept_id,
-                                metadata={
-                                    'memory_id': memory.id,
-                                    'concept_name': concept.name,
-                                    'memory_strength': memory.strength,
-                                    'last_accessed': memory.last_accessed,
-                                    'source': 'cached_semantic',
-                                    'similarity': similarity,
-                                    'group_id': group_id
-                                }
-                            ))
+                    # 归一化 (防止除零)
+                    norm_matrix = np.linalg.norm(matrix, axis=1)
+                    norm_query = np.linalg.norm(query_vec)
+                    
+                    # 避免零向量
+                    norm_matrix[norm_matrix == 0] = 1e-10
+                    if norm_query == 0:
+                        norm_query = 1e-10
+                        
+                    # 计算余弦相似度: (A . B) / (|A| * |B|)
+                    dot_products = np.dot(matrix, query_vec)
+                    similarities = dot_products / (norm_matrix * norm_query)
+                    
+                    # 收集结果
+                    for i, mid in enumerate(mem_ids):
+                        similarity = float(similarities[i])
+                        if similarity > 0.3:
+                            memory = self.memory_system.memory_graph.memories.get(mid)
+                            if not memory:
+                                continue
+                                
+                            concept = self.memory_system.memory_graph.concepts.get(memory.concept_id)
+                            if concept:
+                                results.append(MemoryRecallResult(
+                                    memory=memory.content,
+                                    relevance_score=similarity * self.recall_strategies['semantic'],
+                                    memory_type='semantic',
+                                    concept_id=memory.concept_id,
+                                    metadata={
+                                        'memory_id': memory.id,
+                                        'concept_name': concept.name,
+                                        'memory_strength': memory.strength,
+                                        'last_accessed': memory.last_accessed,
+                                        'source': 'numpy_accelerated',
+                                        'similarity': similarity,
+                                        'group_id': group_id
+                                    }
+                                ))
+                except Exception as e:
+                    logger.warning(f"Numpy 加速计算失败，回退到普通模式: {e}")
+                    use_numpy = False
+            
+            # 如果不使用 Numpy 或 Numpy 失败，回退到循环计算
+            if not use_numpy:
+                for memory in memories_snapshot:
+                    if memory.id in memory_embeddings:
+                        similarity = self._cosine_similarity(query_embedding, memory_embeddings[memory.id])
+                        
+                        if similarity > 0.3:  # 相似度阈值
+                            concept = self.memory_system.memory_graph.concepts.get(memory.concept_id)
+                            if concept:
+                                results.append(MemoryRecallResult(
+                                    memory=memory.content,
+                                    relevance_score=similarity * self.recall_strategies['semantic'],
+                                    memory_type='semantic',
+                                    concept_id=memory.concept_id,
+                                    metadata={
+                                        'memory_id': memory.id,
+                                        'concept_name': concept.name,
+                                        'memory_strength': memory.strength,
+                                        'last_accessed': memory.last_accessed,
+                                        'source': 'cached_semantic',
+                                        'similarity': similarity,
+                                        'group_id': group_id
+                                    }
+                                ))
             
             logger.debug(f"缓存语义召回完成，找到 {len(results)} 条相关记忆")
             return results
