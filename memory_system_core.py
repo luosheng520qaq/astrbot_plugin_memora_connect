@@ -783,9 +783,10 @@ class MemorySystem:
             # 获取记忆形成间隔（对话轮数）
             memory_formation_interval = self.memory_config.get("memory_formation_interval", 15)
             
-            # 简单实现：每隔一定轮数形成一次记忆
-            # 这里可以根据实际需求实现更复杂的逻辑
-            if len(full_history) % memory_formation_interval != 0:
+            # 严格判断：确保只有在达到间隔的整数倍时才触发
+            # 增加最小轮数限制，避免开始时频繁触发
+            history_len = len(full_history)
+            if history_len < memory_formation_interval or history_len % memory_formation_interval != 0:
                 return
 
             # 使用批量提取器，单次LLM调用获取多个记忆
@@ -973,10 +974,21 @@ class MemorySystem:
                     full_history = []
                     # 从配置中获取对话历史条数，默认为20条
                     conversation_history_count = self.memory_config.get("conversation_history_count", 20)
+                    
                     for msg in history[-conversation_history_count:]:  # 使用配置中的条数，避免token过多
+                        # 过滤掉工具调用相关的消息
+                        role = msg.get("role", "user")
+                        if role in ["tool", "function"] or msg.get("type") in ["tool_call", "tool_result"]:
+                            continue
+                            
+                        # 进一步过滤：检查内容是否包含工具调用特征
+                        content = msg.get("content", "")
+                        if not content or (isinstance(content, str) and content.strip().startswith("```json") and "tool_call" in content):
+                            continue
+
                         full_msg = {
-                            "role": msg.get("role", "user"),
-                            "content": msg.get("content", ""),
+                            "role": role,
+                            "content": content,
                             "sender_name": msg.get("sender_name", "用户"),
                             "timestamp": msg.get("timestamp", time.time())
                         }

@@ -124,8 +124,8 @@
   "memory_formation_interval": {
     "description": "记忆形成间隔",
     "type": "int",
-    "hint": "每隔多少轮对话形成一次记忆。",
-    "default": 15
+    "hint": "每隔多少轮对话形成一次记忆",
+    "default": 20
   },
   "exclude_keywords": {
     "description": "排除关键词列表",
